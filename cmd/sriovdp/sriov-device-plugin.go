@@ -33,6 +33,8 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/intel/sriov-network-device-plugin/api"
+	"github.com/intel/sriov-network-device-plugin/pkg/network"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -310,6 +312,45 @@ func (sm *sriovManager) GetDevicePluginOptions(ctx context.Context, empty *plugi
 	}, nil
 }
 
+var nodeName = flag.String("node", "", "k8s node on which this device plugin is running")
+
+func getDevicesMounts(uid string) string {
+	glog.Infof("Getting devices and mounts for Pod UID %v", uid)
+
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		glog.Errorf("Error. Could not get InClusterConfig to create K8s Client. %v", err)
+		return ""
+	}
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		glog.Errorf("Error. Could not create K8s Client using supplied config. %v", err)
+		return ""
+	}
+	selector := "spec.nodeName=" + *nodeName
+	podList, err := clientset.CoreV1().Pods("").List(metav1.ListOptions{FieldSelector: selector})
+	if err != nil {
+		glog.Errorf("Error. Could not list pods with selector %v. %v", selector, err)
+	}
+	for _, pod := range podList.Items {
+		if uid == string(pod.UID) {
+			glog.Info("Found pod")
+			return getPodDetails(clientset, &pod)
+		}
+	}
+	glog.Errorf("Pod not found")
+	return ""
+}
+
+func getPodDetails(k8sclient *kubernetes.Clientset, pod *corev1.Pod) string {
+	nets, err := network.Getk8sNets(k8sclient, pod.Annotations[network.NetAnnonKey])
+	if err != nil {
+		glog.Errorf("Error getting k8s networks for pod uid %v, %v", pod.UID, err)
+	}
+	_ = nets
+	return ""
+}
+
 //API Change: Pod Information passed in here
 //Allocate passes the PCI Addr(s) as an env variable to the requesting container
 func (sm *sriovManager) Allocate(ctx context.Context, rqt *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
@@ -376,6 +417,16 @@ func (sm *sriovManager) SendPodInformation(ctx context.Context, podInfo *api.Pod
 
 func main() {
 	flag.Parse()
+
+	nodeNameEnv := os.Getenv("K8S_NODE_NAME")
+	if *nodeName == "" {
+		if nodeNameEnv == "" {
+			glog.Errorf("node name cannot be empty")
+			return
+		}
+		nodeName = &nodeNameEnv
+	}
+
 	glog.Infof("SRIOV Network Device Plugin started...")
 	sm := newSriovManager()
 	sm.cleanup()
