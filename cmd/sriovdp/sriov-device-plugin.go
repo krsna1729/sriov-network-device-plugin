@@ -347,7 +347,9 @@ func getPodDetails(k8sclient *kubernetes.Clientset, pod *corev1.Pod) string {
 	if err != nil {
 		glog.Errorf("Error getting k8s networks for pod uid %v, %v", pod.UID, err)
 	}
-	_ = nets
+	for _, net := range nets {
+		glog.Infof("%v", net.Spec.Config)
+	}
 	return ""
 }
 
@@ -374,7 +376,7 @@ func (sm *sriovManager) Allocate(ctx context.Context, rqt *pluginapi.AllocateReq
 			}
 			pciAddrs = pciAddrs + id + ","
 		}
-
+		_ = getDevicesMounts(container.PodUID)
 		glog.Infof("PCI Addrs allocated: %s", pciAddrs)
 		envmap := make(map[string]string)
 		envmap["SRIOV-VF-PCI-ADDR"] = pciAddrs
